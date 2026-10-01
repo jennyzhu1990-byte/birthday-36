@@ -67,7 +67,8 @@ button:focus-visible{outline:2px solid var(--aqua);outline-offset:4px}
 .cursor.on{opacity:1}
 .cursor .dot{position:absolute;left:50%;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;
   background:#f4fbff;box-shadow:0 0 12px 3px rgba(150,230,255,.85),0 0 30px 8px rgba(80,150,255,.45);transition:transform .15s}
-.cursor.pinch .dot{transform:scale(.55)}
+.cursor.pinch .dot{transform:scale(.55);background:#ffd27a}
+.cursor.point .dot{transform:scale(.75);background:#ffc6dc}
 .cursor svg{position:absolute;inset:0;transform:rotate(-90deg)}
 .cursor circle{fill:none;stroke-width:2}
 .cursor .track{stroke:rgba(200,230,255,.18)}
@@ -142,6 +143,13 @@ button:focus-visible{outline:2px solid var(--aqua);outline-offset:4px}
 .bless .l3{font-family:"Long Cang","Kaiti SC",cursive;font-size:clamp(22px,4.8vw,32px);color:#ffe6c4;text-shadow:0 0 12px rgba(255,140,200,.7)}
 .bless .l4{font-family:"Long Cang","Kaiti SC",cursive;font-size:clamp(17px,3.6vw,24px);color:#ffe6c4;margin-top:4px}
 .gatecard::before{content:"";position:absolute;inset:-45%;background:radial-gradient(closest-side,rgba(255,79,154,.38),rgba(120,70,255,.2) 55%,transparent);filter:blur(8px);z-index:-1;pointer-events:none}
+.toast{position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + 16px);transform:translateX(-50%);max-width:90vw;margin:0;padding:9px 16px;border-radius:12px;background:rgba(20,14,50,.82);border:1px solid rgba(255,200,230,.35);color:#fff0f6;font-size:13px;line-height:1.5;text-align:center;opacity:0;transition:opacity .5s;z-index:9;pointer-events:none}
+.toast.on{opacity:1}
+.eggs{position:absolute;right:calc(env(safe-area-inset-right,0px) + 12px);top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:14px;opacity:0;transition:opacity 1s;z-index:5}
+.eggs.on{opacity:1}
+.eggs span{font-size:20px;line-height:1;filter:grayscale(1) sepia(1) saturate(2.4) hue-rotate(-12deg) brightness(1.15) drop-shadow(0 0 6px rgba(255,200,120,.6));opacity:.55}
+.eggs span.hit{animation:egg 1.2s ease-out}
+@keyframes egg{0%{transform:scale(1.9);opacity:1;filter:none}100%{transform:scale(1);opacity:.55}}
 .music{position:absolute;top:calc(env(safe-area-inset-top,0px) + 92px);right:14px;width:36px;height:36px;border-radius:50%;
   border:1px solid var(--line);background:rgba(160,210,255,.07);color:var(--ice);font-size:14px}
 [hidden]{display:none!important}
@@ -153,6 +161,8 @@ button:focus-visible{outline:2px solid var(--aqua);outline-offset:4px}
 <div class="ui">
   <div class="gatecard" id="gate" role="button" tabindex="0" aria-label="开启礼物"><div class="inner"><div class="face back" id="gBack"></div><div class="face front" id="gFront"></div></div></div>
   <p class="hint" id="hint" aria-live="polite"></p>
+  <div class="eggs" id="eggs" aria-hidden="true"><span data-k="heart">🫶</span><span data-k="thumb">👍</span><span data-k="peace">✌️</span></div>
+  <p class="toast" id="toast" role="status"></p>
   <div class="palm" id="palm" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M16 26V12a2.5 2.5 0 015 0v11M21 22V9a2.5 2.5 0 015 0v13M26 22V10a2.5 2.5 0 015 0v13M31 23v-8a2.5 2.5 0 015 0v13c0 8-5 13-12 13-5 0-8-2-11-6l-5-7a2.5 2.5 0 014-3l3 3" fill="none" stroke="#f6e2b3" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
   <div class="intro" id="intro"></div>
   <div class="dealring" id="dealring" hidden><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="tr"/><circle cx="60" cy="60" r="52" class="pg" id="dealprog" stroke-dasharray="326.7" stroke-dashoffset="326.7"/></svg></div>
@@ -632,7 +642,8 @@ function updateCards(dt,cx,cy){
   for(const c of cards){
     wv.copy(c.n).applyQuaternion(globeQ); c.face=wv.z/(c.n.length()||1);
     let ts=cs*c.sz*(1+.3*c.face)*(c===hovered?1.4:1);
-    if(c===focused){ c.tp.set(camera.position.x*.5,VH*.05+camera.position.y*.5,30); ts=Math.min(1.9,(VW/2*.84)/c.cw,(VH/2*.6)/c.ch); }
+    if(c===grabbed){ const [gx,gy]=toWorld(hand.x,hand.y); c.tp.set(gx*.7,gy*.7,18); ts=cs*3.2; }
+    else if(c===focused){ c.tp.set(camera.position.x*.5,VH*.05+camera.position.y*.5,30); ts=Math.min(1.9,(VW/2*.84)/c.cw,(VH/2*.6)/c.ch); }
     else { c.tp.copy(wv).multiplyScalar(globeR); c.tp.y+=globeY+Math.sin(now*.8+c.bob)*.25; }
     const fe=(c===focused||c.back)?1-Math.exp(-4.5*dt):1-Math.exp(-10*dt);
     c.g.position.lerp(c.tp,fe); c.g.quaternion.copy(camera.quaternion);
@@ -651,15 +662,14 @@ function updateCards(dt,cx,cy){
 }
 
 /* ---------- hands ---------- */
-const hand={on:false,x:.5,y:.5,px:.5,py:.5,vx:0,vy:0,open:false,pinch:false,pinchEdge:false};
+const hand={on:false,x:.5,y:.5,px:.5,py:.5,vx:0,vy:0,open:false,pinch:false,fist:false,point:false,pinchEdge:false,gesture:'',miss:0};
 let landmarker=null, gestureOK=false, lastDet=0;
 async function initHands(){
   try{
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}}});
-    const v=$('cam'); v.srcObject=stream; await v.play();
+    const v=$('cam'); if(!v.srcObject) throw new Error('no camera');
     const vision=visionMod=visionMod||await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
     const files=visionFiles=visionFiles||await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
-    const opts=d=>({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:d},runningMode:'VIDEO',numHands:1});
+    const opts=d=>({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:d},runningMode:'VIDEO',numHands:2});
     try{ landmarker=await vision.HandLandmarker.createFromOptions(files,opts('GPU')); }catch(e){ landmarker=await vision.HandLandmarker.createFromOptions(files,opts('CPU')); }
     gestureOK=true; setStatus(true); refreshHint();
   }catch(e){ console.warn('gesture unavailable',e); setStatus(false); refreshHint(); }
@@ -669,23 +679,55 @@ function detect(t){
   const v=$('cam'); if(!landmarker||v.readyState<2||t-lastDet<33) return;
   const dtd=(t-lastDet)/1000; lastDet=t;
   let r; try{ r=landmarker.detectForVideo(v,t); }catch(e){ return; }
-  const L=r&&r.landmarks&&r.landmarks[0];
-  if(!L){ hand.on=false; hand.pinch=false; return; }
+  const L=r&&r.landmarks&&r.landmarks[0]; if(L) checkEggs(r.landmarks);
+  if(!L){ if(++hand.miss>4){ hand.on=false; hand.pinch=false; hand.fist=false; hand.gesture=''; } return; }
+  hand.miss=0;
   const X=p=>1-p.x, dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
   const pxn=(X(L[0])+X(L[5])+X(L[9])+X(L[13])+X(L[17]))/5, pyn=(L[0].y+L[5].y+L[9].y+L[13].y+L[17].y)/5;
   if(hand.on&&dtd<.3){ hand.vx=hand.vx*.5+((pxn-hand.px)/dtd)*.5; hand.vy=hand.vy*.5+((pyn-hand.py)/dtd)*.5; } else hand.vx=hand.vy=0;
   hand.px=pxn; hand.py=pyn;
-  const tx=(X(L[4])+X(L[8]))/2, ty=(L[4].y+L[8].y)/2;
-  if(!hand.on){hand.x=tx;hand.y=ty;} else { hand.x+=(tx-hand.x)*.55; hand.y+=(ty-hand.y)*.55; }
-  let ext=0; for(const [a,b] of [[8,6],[12,10],[16,14],[20,18]]) if(dist(L[a],L[0])>dist(L[b],L[0])*1.12) ext++;
+  const D3=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,(a.z-b.z)*.6), palm=D3(L[5],L[17])||.001;
+  const up=[[8,6],[12,10],[16,14],[20,18]].map(([a,b])=>D3(L[a],L[0])>D3(L[b],L[0])*1.1);
+  const ext=up.filter(Boolean).length;
   hand.open=ext>=4;
-  const pn=dist(L[4],L[8])/(dist(L[0],L[9])||1)<.32; if(pn&&!hand.pinch) hand.pinchEdge=true; hand.pinch=pn; hand.on=true;
+  hand.point=up[0]&&!up[1]&&!up[2]&&!up[3];
+  const fistNow=ext===0 && D3(L[8],L[0])<D3(L[5],L[0])*1.25;
+  const pr=D3(L[4],L[8])/palm;                      // pinch with hysteresis: close < .45, open again > .7
+  const pinchNow=hand.pinch?pr<.7:pr<.45;
+  if((pinchNow&&!hand.pinch)||(fistNow&&!hand.fist)) hand.pinchEdge=true;   // pinch OR fist = "click"
+  hand.pinch=pinchNow; hand.fist=fistNow;
+  hand.gesture=hand.pinch?'pinch':hand.fist?'fist':hand.point?'point':hand.open?'open':'';
+  // cursor: index tip when pointing, between thumb and index when pinching, palm centre otherwise
+  const tx=hand.point?X(L[8]):hand.pinch?(X(L[4])+X(L[8]))/2:pxn, ty=hand.point?L[8].y:hand.pinch?(L[4].y+L[8].y)/2:pyn;
+  if(!hand.on){hand.x=tx;hand.y=ty;} else { hand.x+=(tx-hand.x)*.5; hand.y+=(ty-hand.y)*.5; }
+  hand.on=true;
 }
 
 /* ---------- mic ---------- */
 let an=null,abuf=null,actx=null,micFloor=null,micAcc=0,micN=0,micStart=0;
-async function initMic(){ try{ const st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
-  actx=new (window.AudioContext||window.webkitAudioContext)(); const src=actx.createMediaStreamSource(st); an=actx.createAnalyser(); an.fftSize=1024; an.smoothingTimeConstant=.3; src.connect(an); abuf=new Uint8Array(an.frequencyBinCount); }catch(e){ an=null; } }
+async function initMic(){}
+function toast(t){ const el=$('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(toast.tm); toast.tm=setTimeout(()=>el.classList.remove('on'),7000); }
+function setupMic(stream){
+  try{ actx=SFX.ctx||new (window.AudioContext||window.webkitAudioContext)(); actx.resume&&actx.resume();
+    const src=actx.createMediaStreamSource(new MediaStream(stream.getAudioTracks())); an=actx.createAnalyser(); an.fftSize=1024; an.smoothingTimeConstant=.3;
+    const mute=actx.createGain(); mute.gain.value=0; src.connect(an); an.connect(mute); mute.connect(actx.destination); abuf=new Uint8Array(an.frequencyBinCount); micOK=true;
+  }catch(e){ an=null; }
+}
+let micOK=false, camOK=false;
+async function initMedia(){
+  const md=navigator.mediaDevices; if(!md||!md.getUserMedia){ toast('这个浏览器不支持摄像头和麦克风，换 Chrome 或 Safari 试试'); return; }
+  const audioC={echoCancellation:false,noiseSuppression:false,autoGainControl:false}, videoC={facingMode:'user',width:{ideal:640},height:{ideal:480}};
+  let st=null;
+  try{ st=await md.getUserMedia({video:videoC,audio:audioC}); }
+  catch(e){
+    try{ st=await md.getUserMedia({video:videoC}); }catch(e2){}
+    try{ const a=await md.getUserMedia({audio:true}); if(st) a.getAudioTracks().forEach(t=>st.addTrack(t)); else st=a; }catch(e3){}
+  }
+  if(st&&st.getAudioTracks().length) setupMic(st); else toast('麦克风没有打开：点地址栏旁边的锁形图标，允许麦克风，然后刷新页面');
+  if(st&&st.getVideoTracks().length){ const v=$('cam'); v.srcObject=new MediaStream(st.getVideoTracks()); try{ await v.play(); }catch(e){} camOK=true; initHands(); }
+  else if(micOK) toast('摄像头没有打开：手势用不了，可以用点屏幕代替');
+  if(SFX.ctx&&SFX.ctx.state!=='running') SFX.ctx.resume();
+}
 function micStrength(t){
   if(!an) return 0; an.getByteFrequencyData(abuf);
   const hz=actx.sampleRate/an.fftSize, lo=Math.max(1,Math.floor(60/hz)), hi=Math.floor(700/hz); let s=0; for(let i=lo;i<=hi;i++) s+=abuf[i]; s/=(hi-lo+1);
@@ -696,7 +738,6 @@ function micStrength(t){
 /* ---------- sound effects (synthesised) ---------- */
 const SFX={ctx:null,last:{},
   init(){ try{
-      try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
       if(!this.unlockEl){ const a=new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA='); a.loop=true; a.setAttribute('playsinline',''); a.play().catch(()=>{}); this.unlockEl=a; }
       this.ctx=this.ctx||new (window.AudioContext||window.webkitAudioContext)(); this.ctx.resume();
       const b=this.ctx.createBuffer(1,1,22050), src=this.ctx.createBufferSource(); src.buffer=b; src.connect(this.ctx.destination); src.start(0);
@@ -729,11 +770,11 @@ const SFX={ctx:null,last:{},
 /* ---------- music ---------- */
 /* scene music, all synthesised: bells, plucks, music box, claps and light drums; crossfades between scenes */
 const Music={cur:null,
-  play(mode){ if(!SFX.ctx||CONFIG.music) return; if(this.cur&&this.cur.mode===mode) return; if(this.cur) this.cur.stop(); this.cur=this.make(mode); },
+  play(mode){ mode='party'; if(!SFX.ctx||CONFIG.music) return; if(this.cur&&this.cur.mode===mode) return; if(this.cur) this.cur.stop(); this.cur=this.make(mode); },
   stop(){ if(this.cur){ this.cur.stop(); this.cur=null; } },
   make(mode){
     const c=SFX.ctx, out=c.createGain(); out.gain.value=0; out.connect(c.destination);
-    const vol={intro:.2,party:.22,partysoft:.12,box:.24,nostalgia:.2,nostalgiasoft:.1,game:.17,finale:.24}[mode]||.18;
+    const vol={intro:.2,party:.34,partysoft:.12,box:.24,nostalgia:.2,nostalgiasoft:.1,game:.17,finale:.24}[mode]||.18;
     out.gain.linearRampToValueAtTime(vol,c.currentTime+1.2);
     const dl=c.createDelay(); dl.delayTime.value=.24; const fb=c.createGain(); fb.gain.value=.25; const wet=c.createGain(); wet.gain.value=.28; dl.connect(fb); fb.connect(dl); dl.connect(wet); wet.connect(out);
     const F={}; const names=['C','Cs','D','Ds','E','F','Fs','G','Gs','A','As','B']; for(let o=1;o<7;o++) names.forEach((n,i)=>F[n+o]=440*Math.pow(2,(o-4)+(i-9)/12));
@@ -834,7 +875,7 @@ async function veil(v,ms){ const el=$('veil'); el.style.transition=`opacity ${ms
 let camZ=60;
 async function trans(name,z=60){ await veil(1,480); camZ=z; camera.position.z=z; go(name); await sleep(200); veil(0,800); }
 const PALM={fire:'hold',cake:'wave',collect:'hold'};
-const IDLE={fire:['张开手掌停住，继续','长按屏幕，继续'],cake:['对着屏幕吹一口气，或挥挥手','对着屏幕吹一口气，或点一下蜡烛'],photos:['指向一张照片，捏一下','点一张照片'],photosDone:['看完了？张开手掌停住，进入下一幕','看完了？长按屏幕，进入下一幕'],
+const IDLE={fire:['握拳或捏手指放烟花，张开手掌停住继续','点屏幕放烟花，长按继续'],cake:['对着屏幕吹一口气，或挥挥手','对着屏幕吹一口气，或点一下蜡烛'],photos:['食指指着一张照片停一下，或者握拳打开','点一张照片'],photosDone:['看完了？张开手掌停住，进入下一幕','看完了？长按屏幕，进入下一幕'],
   deal:['大声喊“生日快乐”！','大声喊“生日快乐”，或者长按屏幕'],collect:['张开手掌停住','长按屏幕'],end:['张开手掌停住，拍张合照','长按屏幕，拍张合照'],booth:['张开手掌停两秒，自动拍照','长按屏幕，或点右上角拍照']};
 let lastAct=0, idleShown=false;
 function act(){ lastAct=now; if(idleShown){ idleShown=false; hint.style.opacity=0; } }
@@ -845,16 +886,18 @@ const toWorld=(x,y)=>[(x-.5)*VW,(.5-y)*VH];
 setTimeout(()=>fontsReady.then(()=>{ $('gBack').style.backgroundImage=`url(${greenBack().toDataURL()})`; $('gFront').style.backgroundImage=`url(${greenCard('A','♥').canvas2d.toDataURL()})`; }),0);
 let opened=false;
 async function openGift(){
-  if(opened) return; opened=true; SFX.init(); startMusic(); initMic(); initHands();
+  if(opened) return; opened=true; SFX.init(); startMusic(); initMedia();
   $('gate').classList.add('flip'); SFX.play('flip',.8); SFX.play('sparkle',.7);
-  await sleep(1900); $('gate').classList.add('gone'); await fontsReady; await sleep(700); go('countdown');
+  await sleep(1900); $('gate').classList.add('gone'); await fontsReady;
+  for(let i=0;i<25&&!camOK;i++) await sleep(120);
+  if(camOK&&$('cam').readyState>=2) go('mirror'); else { await sleep(500); go('countdown'); }
 }
 $('gate').addEventListener('click',openGift);
 $('gate').addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openGift(); } });
 let pillAction=null; $('pill').addEventListener('click',()=>{ if(pillAction){ const f=pillAction; pillAction=null; f(); } else onHold(); });
-function go(n){ $('pill').hidden=true; S=n; holdP=0; allowHold=false; ({countdown,fire,cakeScene,photos,deal,finale,booth})[n](); }
+function go(n){ $('pill').hidden=true; S=n; $('eggs').classList.toggle('on',n!=='booth'&&n!=='mirror'); holdP=0; allowHold=false; ({mirror,countdown,fire,cakeScene,photos,deal,finale,booth})[n](); }
 
-async function countdown(){ Music.stop(); SFX.play('roll',.5);
+async function countdown(){ SFX.play('roll',.5);
   await sleep(500);
   const cnt=Math.round(N*.36);
   for(const d of ['3','2','1']){
@@ -866,7 +909,7 @@ async function countdown(){ Music.stop(); SFX.play('roll',.5);
 }
 async function fire(){ Music.play('party');
   const cnt=Math.round(N*.72);
-  setShape(textPoints(['生日快乐'],`900 300px ${SERIF}`,cnt,Math.min(VW*.86,48),VH*.22,VH*.04),cnt);
+  setShape(textPoints(['亲爱的，','生日快乐'],`900 280px ${SERIF}`,cnt,Math.min(VW*.86,48),VH*.36,VH*.04),cnt);
   tint(0,cnt,[['gold',.38],['champ',.27],['white',.2],['pinkF',.15]]);
   await sleep(2600); if(S!=='fire')return;
   burstMain(0,VH*.04,0,34);
@@ -1026,6 +1069,58 @@ async function deal(){ Music.play('game');
   const bl=$('bless'); bl.classList.add('on'); SFX.play('chime',.6); Music.play('finale');
   await sleep(9000);
   S='end'; holdTime=2; allowHold=true; PALM.end='hold'; showHint('end');
+}
+
+/* ---------- you, in stars: the camera drawn as a field of particles ---------- */
+let mirrorOn=null; const mcv=document.createElement('canvas'), mcx=mcv.getContext('2d',{willReadFrequently:true}); let mLast=0;
+async function mirror(){
+  const cols=mobile?110:150, rows=Math.round(cols*.75), n=cols*rows, h=Math.min(VH*.78,VW*.8*.75), w=h/.75, arr=new Float32Array(n*3);
+  for(let r=0;r<rows;r++) for(let q=0;q<cols;q++){ const i=r*cols+q; arr[i*3]=(q/(cols-1)-.5)*w+rand(-.05,.05); arr[i*3+1]=(.5-r/(rows-1))*h+rand(-.05,.05); arr[i*3+2]=rand(-.3,.3); }
+  mcv.width=cols; mcv.height=rows; resetStyle(); setShape(arr,n); for(let i=0;i<n;i++) main.alpha[i]=0; main.aAlpha.needsUpdate=true;
+  mirrorOn={cols,rows,n}; await sleep(7800); mirrorOn=null;
+  burstMain(0,0,0,30); await sleep(400); resetStyle(); await sleep(700); go('countdown');
+}
+function updateMirror(t){
+  if(!mirrorOn||t-mLast<66) return; mLast=t; const v=$('cam'); if(v.readyState<2||!v.videoWidth) return;
+  const {cols,rows,n}=mirrorOn, s=Math.max(cols/v.videoWidth,rows/v.videoHeight), w=v.videoWidth*s, h=v.videoHeight*s;
+  mcx.save(); mcx.translate(cols,0); mcx.scale(-1,1); mcx.drawImage(v,(cols-w)/2,(rows-h)/2,w,h); mcx.restore();
+  const d=mcx.getImageData(0,0,cols,rows).data;
+  for(let i=0;i<n;i++){ const L=(d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11)/255, a=clamp((L-.06)*2.2,0,1);
+    main.alpha[i]=a; main.size[i]=.5+L*1.1;
+    const c=L>.7?C.white:L>.45?C.gold:C.pinkF; main.col[i*3]=c[0]; main.col[i*3+1]=c[1]; main.col[i*3+2]=c[2]; }
+  main.aAlpha.needsUpdate=main.aSize.needsUpdate=main.aCol.needsUpdate=true;
+}
+
+/* ---------- stardust that follows the hand ---------- */
+function trail(){
+  const on=(hand.on&&S!=='gate'&&S!=='booth')||(ptr.down&&S!=='booth'&&S!=='gate'); if(!on) return;
+  const [wx,wy]=toWorld(ptr.down?ptr.x:hand.x,ptr.down?ptr.y:hand.y); const k=mobile?2:3;
+  for(let i=0;i<k;i++) fw.spawn(wx+rand(-.3,.3),wy+rand(-.3,.3),3,rand(-1.2,1.2),rand(-.5,1.5),rand(-.5,.5),{life:rand(.6,1.1),g:1.2,drag:1.5,c0:[C.gold,C.pinkF,C.white,C.violet][Math.random()*4|0],c1:C.peri,glit:true,size:rand(.7,1.3)});
+}
+
+/* ---------- hidden gesture treats: two-hand heart, thumbs up, peace sign ---------- */
+const eggCool={heart:0,thumb:0,peace:0};
+function eggFlash(k){ const el=document.querySelector(`#eggs [data-k="${k}"]`); if(el){ el.classList.remove('hit'); void el.offsetWidth; el.classList.add('hit'); } }
+function heartFirework(cx,cy,scale){
+  const n=mobile?320:560; SFX.play('boom',.8); SFX.play('sparkle',.7);
+  for(let i=0;i<n;i++){ const t=i/n*TAU, hx=16*Math.pow(Math.sin(t),3), hy=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t), sp=scale*rand(.95,1.05);
+    fw.spawn(cx,cy,2,hx*sp,hy*sp,rand(-1,1),{life:rand(1.8,2.4),g:1.5,drag:1.9,c0:i%3?C.pinkF:C.magenta,c1:C.rose,glit:Math.random()<.4,size:rand(1.3,2)}); }
+  fw.spawn(cx,cy,2,0,0,0,{life:.3,c0:C.white,size:22,a:1});
+}
+function checkEggs(lms){
+  if(!lms||S==='gate'||S==='booth'||S==='mirror') return;
+  const tt=now;
+  if(lms.length>=2&&tt>eggCool.heart){ const a=lms[0], b=lms[1], d=(p,q)=>Math.hypot(p.x-q.x,p.y-q.y), size=d(a[0],a[9]);
+    if(d(a[8],b[8])<size*.6&&d(a[4],b[4])<size*.6&&(a[8].y+b[8].y)<(a[4].y+b[4].y)){ eggCool.heart=tt+4; eggFlash('heart');
+      const [wx,wy]=toWorld(1-(a[8].x+b[8].x)/2,(a[8].y+a[4].y+b[8].y+b[4].y)/4); heartFirework(wx,wy+2,mobile?.55:.9); return; } }
+  const L=lms[0], D=(p,q)=>Math.hypot(p.x-q.x,p.y-q.y), w=D(L[5],L[17])||.001;
+  const ext=k=>D(L[[8,12,16,20][k]],L[0])>D(L[[6,10,14,18][k]],L[0])*1.1, [f1,f2,f3,f4]=[0,1,2,3].map(ext);
+  const [hx,hy]=toWorld(1-L[9].x,L[9].y);
+  if(!f1&&!f2&&!f3&&!f4&&(L[3].y-L[4].y)>w*.6&&L[4].y<L[5].y&&tt>eggCool.thumb){ eggCool.thumb=tt+2.5; eggFlash('thumb'); SFX.play('tada',.6);
+    for(let i=0;i<220;i++){ const a=rand(-.4,.4)-Math.PI/2, sp=rand(10,20); fw.spawn(hx,hy+2,2,Math.cos(a)*sp,-Math.sin(a)*sp,rand(-2,2),{life:rand(1.6,2.4),g:7,drag:1.2,c0:[C.gold,C.lemon,C.white][i%3],c1:C.champ,glit:true,size:rand(1.2,2)}); } }
+  if(f1&&f2&&!f3&&!f4&&D(L[8],L[12])>w*.7&&tt>eggCool.peace){ eggCool.peace=tt+2.5; eggFlash('peace'); SFX.play('sparkle',.6);
+    for(let k=0;k<7;k++){ const ox=hx+rand(-4,4), oy=hy+rand(0,3); for(let i=0;i<46;i++){ const t=i/46*TAU, x=16*Math.pow(Math.sin(t),3)*.07, y=(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))*.07;
+      fw.spawn(ox+x,oy+y,2,rand(-.4,.4),rand(2,4),0,{life:rand(1.8,2.6),g:-.6,drag:.4,c0:C.pinkF,c1:C.rose,size:.9}); } } }
 }
 
 /* ---------- finale: Royal Flush 36 ---------- */
@@ -1373,15 +1468,17 @@ $('again').addEventListener('click',()=>{ boothFrozen=false; bcv.classList.remov
 
 /* ---------- loop ---------- */
 const cursor=$('cursor'), prog=$('prog'); cursor.style.zIndex=6;
-let last=performance.now(), micBlow=0; const rotM=new THREE.Matrix4(), rotE=new THREE.Euler();
+let grabbed=null, last=performance.now(), micBlow=0; const dwell={c:null,t:0}; const rotM=new THREE.Matrix4(), rotE=new THREE.Euler();
 function frame(t){
   const dt=Math.min(.05,(t-last)/1000); last=t; now+=dt;
   detect(t);
 
   if(hand.pinchEdge){ hand.pinchEdge=false;
     if(S==='fire'){ const [wx,wy]=toWorld(hand.x,hand.y); launch(wx,wy); autoFw=now+4; }
-    else if(S==='photos'){ if(focused){ unfocus(); showHint('photos'); } else if(hovered){ focusCard(hovered); showHint('photoOpen'); } }
+    else if(S==='photos'){ if(focused){ unfocus(); showHint('photos'); } else if(hovered){ if(hand.fist){ grabbed=hovered; SFX.play('slide',.5); } else { focusCard(hovered); showHint('photoOpen'); } } }
   }
+  if(grabbed&&(!hand.on||!hand.fist)){ const g=grabbed; grabbed=null; if(S==='photos'){ focusCard(g); showHint('photoOpen'); } }
+  if(S==='photos'&&!focused&&!grabbed&&hovered&&hand.on&&!hand.open&&!hand.fist){ if(dwell.c!==hovered){ dwell.c=hovered; dwell.t=0; } dwell.t+=dt; if(dwell.t>1.2){ focusCard(hovered); showHint('photoOpen'); dwell.t=0; dwell.c=null; } } else { dwell.t=0; dwell.c=null; }
   if(S==='fire'&&allowHold&&now>autoFw){ launch(rand(-.35,.35)*VW,rand(.08,.3)*VH); autoFw=now+rand(2.2,3.4); }
   
   const handStill=hand.on&&hand.open&&Math.hypot(hand.vx,hand.vy)<.4;
@@ -1390,9 +1487,9 @@ function frame(t){
   if(holdP>=1){ ptr.down=false; onHold(); }
   const cx=ptr.down?ptr.x:hand.x, cy=ptr.down?ptr.y:hand.y;
   cursorActive=(hand.on&&S!=='gate')||(ptr.down&&allowHold);
-  cursor.classList.toggle('on',cursorActive); cursor.classList.toggle('pinch',hand.pinch);
+  cursor.classList.toggle('on',cursorActive); cursor.classList.toggle('pinch',hand.pinch||hand.fist); cursor.classList.toggle('point',hand.point);
   cursor.style.transform=`translate(${cx*innerWidth}px,${cy*innerHeight}px)`;
-  prog.style.strokeDashoffset=163.4*(1-clamp(holdP,0,1));
+  prog.style.strokeDashoffset=163.4*(1-clamp(Math.max(holdP,dwell.t/1.2),0,1));
 
   if(S==='photos') updateGlobeRot(dt);
   if(rot){
@@ -1427,6 +1524,7 @@ function frame(t){
     }
   }
 
+  updateMirror(t); trail();
   fw.update(dt); flames.update(dt); updateFwLines();
   for(let i=rockets.length-1;i>=0;i--){ const r=rockets[i]; r.t+=dt; r.vy-=r.G*dt; r.x+=r.vx*dt; r.y+=r.vy*dt;
     fw.spawn(r.x,r.y,r.z,rand(-.4,.4),rand(-1.5,0),0,{life:rand(.4,.7),c0:C.gold,c1:[.8,.35,.15],size:rand(.8,1.2),g:1,glit:true});
@@ -1451,7 +1549,7 @@ function frame(t){
 }
 const fontsReady=Promise.race([Promise.all([
   document.fonts.load(`40px "Great Vibes"`,'Happy Birthday'), document.fonts.load(`40px "Long Cang"`,'我们是你最好的手牌生日快乐老婆雨伦小包年月日'),
-  document.fonts.load(`900 300px "Noto Serif SC"`,'生日快乐321'),
+  document.fonts.load(`900 300px "Noto Serif SC"`,'亲爱的，生日快乐321'),
   document.fonts.load(`400 30px "Noto Serif SC"`,'替换成你的照片'),
   document.fonts.load(`italic 600 200px "Cormorant Garamond"`,'Happy Birthday')]).catch(()=>{}),sleep(3000)]);
 addEventListener('resize',resize); resize();
